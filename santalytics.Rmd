@@ -1,0 +1,192 @@
+---
+title: "Santalytics"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Santalytics Part 1
+
+- Alteryx Original Post: <https://community.alteryx.com/t5/SANTALYTICS-2016/SANTALYTICS-Part-1/m-p/38846#U38846>
+- Alteryx Original Solution: <https://community.alteryx.com/t5/Alter-Nation-Blog/SANTALYTICS-Part-1-Solution-and-Behind-the-Data/ba-p/39324>
+
+With an impossible task looming, poor old Santa is clueless at best. There are 15,000 kids in this route (`Recipient Database.xlsx`, `Address Database.xlsx`) and he'll have to somehow stitch together all the data he's gotten from his elves - a dozen log files of what the kids have been up to this year (`* Action Log.xlsx`). Summarizing these and finding a rating for each kid should help! You can do so by subtracting just how naughty they were from how nice they were throughout the year.
+
+Santa has been doing this for centuries and has used trial and error to build out his naughty and nice ratings for grouping the kids (`Naughty or Nice Ratings.xlsx`). Using an approximate even distribution while assigning to each of the 25 groups, can you use Alteryx to determine which kids fall into each category this year?
+
+We only have so many days until the Holidays and presents also need to be assigned too! We already know the naughty kids will get coal, but what about the other 20 groupings of kids? The elves do good work, but presents aren't free - we should probably use the price of each gift to make sure the best kids are getting the best classes of gifts! You can use the price of the gifts to also sort these into 20 evenly distributed groups. Let's hold off until Santa knows his exact routes to pick the gifts specifically - the Reindeer can only hold so much!
+
+### Goal of Part 1:
+
+We want a list of recipients ranked with 
+
+- their Naughty or Nice rating and Score 
+- the class of present they are entitled to.
+
+Some R packages we'll need:
+
+```{r libs, cache = FALSE}
+library(fs)
+library(here)
+library(readxl)
+library(Hmisc)
+library(magrittr)
+library(hrbrthemes)
+library(tidyverse)
+```
+
+Grabbing the data from the post:
+
+```{r data}
+if (!file.exists(here::here("data/santalytics.zip"))) {
+  
+  download.file(
+    url = "https://community.alteryx.com/pvsmt99345/attachments/pvsmt99345/santalytics2016/2/1/Santalytics%20Part%201.yxzp",
+    destfile = here::here("data/santalytics.zip")
+  )
+  
+  unzip(
+    zipfile = here::here("data/santalytics.zip"),
+    exdir = here::here("data/santalytics")
+  )
+  
+}
+```
+
+Quick look at the file structure:
+
+```{r data-files-soverview, comment = ""}
+fs::dir_tree(here::here("data/santalytics"))
+```
+
+```{r d3}
+ratings <- read_excel(here::here("data/santalytics/Data/Naughty or Nice Ratings.xlsx"))
+
+glimpse(ratings)
+
+ratings
+```
+
+
+```{r d1}
+if (!file.exists(here::here("data/actions.rds"))) {
+  list.files(here::here("data/santalytics/Data/"), pattern = "Action", full.names = TRUE) %>% 
+    map_df(read_excel) -> actions
+  saveRDS(actions, here::here("data/actions.rds"))
+}
+
+actions <- readRDS(here::here("data/actions.rds"))
+
+glimpse(actions)
+
+actions
+```
+
+```{r d2}
+mutate(actions, Degree = ifelse(Alignment == "Naughty", -Degree, Degree)) %>% 
+  count(ID, wt = Degree, name = "social_score") %>% 
+  mutate(find_out = ifelse(social_score < 0, "naughty", "nice"))  -> surveillance_tally
+
+ggplot(surveillance_tally, aes(social_score)) +
+  geom_density(fill = alpha(ft_cols$blue, 3/4)) +
+  labs(
+    x = "Overall Surveillance Behaviour Score", y = "Density",
+    title = "Surveillance Behaviour Score Distribution"
+  ) +
+  theme_ipsum_es(grid="XY")
+
+arrange(surveillance_tally, social_score)
+
+filter(surveillance_tally, find_out == "naughty") %>% 
+  mutate(grp = cut2(social_score, g = 5) %>% as.integer()) %>% 
+  bind_rows(
+    filter(surveillance_tally, find_out == "nice") %>% 
+      mutate(grp = cut2(social_score, g = 20) %>% as.integer() %>% add(5)) 
+  ) -> surveillance_tally
+
+count(surveillance_tally, grp, find_out) %>% 
+  ggplot(aes(grp, n)) +
+  geom_col(aes(fill = find_out)) +
+  scale_fill_manual(values = c("naughty" = "black", "nice" = "forestgreen")) +
+  theme_ipsum_es(grid="Y")
+```
+
+
+```{r d4}
+presents <- read_excel(here::here("data/santalytics/Data/Presents.xlsx"))
+
+glimpse(presents)
+
+presents %>% 
+  mutate(
+    Price = as.numeric(Price),
+    grp = cut2(Price, g = 20) %>% as.integer() %>% add(5)
+  ) -> presents
+
+count(presents, grp)
+```
+
+
+```{r}
+addresses <- read_excel(here::here("data/santalytics/Data/Address Database.xlsx"))
+ggplot(addresses) + geom_point(aes(Longitude, Latitude))
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+## Santalytics Part 2
+
+With an impossible task looming, poor old Santa is clueless at best. There are 15,000 kids in this route (Recipient 
+
+The Elf thanks you all for participating in Part 1. In fact we are so excited over the level of participation, that we are upping the ante. Stay tuned on that.  For now we are onto part 2 and it's going to get tricky. 
+
+With nice kids scattered across the globe, Santa can't be wasting any time this Holiday season! Use the Create Points Tool, of course, to identify where all our presents need to make it this year. We'll have to call on the elves to distribute them to each house, but let's see if we can't keep Santa from making any extra trips.
+
+Determine the least number of trade areas we can distribute bunches of presents to while making sure that no two points in a distribution hub are more than 500 miles apart - remember, we only need to worry about including the nice kids who will be getting presents delivered this year. Once your distribution hubs are assigned, what's the minimum weight that we can use for every one of the hubs while making sure each kid gets a present from the classification of present that they earned? Santa will worry about how many reindeer to hook to the sleigh, but we need to let him know the minimum towage to account for!
+
+### Goal of Part 2:
+
+- Find a list of delivery "hubs" that include every nice kid - with no two kids in a hub being more than 500 miles apart or 250 miles from the central recipient (hub) location
+- Identify the minimum weight that be used to deliver presents (with respect to each present class in that hub) to every hub, excluding presents of 0 or null weight
+
+
+## Santalytics Part 3
+
+In Part 2 we identified the hubs Santa will visit this season and the minimum weight that can deliver presents to every kid in those hubs with respect to their present score.
+
+But what about maximizing the space of the sled so that it’s full, while accounting for how much weight the reindeer can pull?
+
+Can you help the elves revisit the present assignments for each nice kid now that we know how many reindeer Santa is attaching to the sleigh this year? They want to make sure every kid is getting the biggest and best (priciest then heaviest in priority order) present they earned in their present classes. The kids who behaved the best should be the first to get their presents adjusted - they earned it!
+
+### Goal of Part 3:
+
+Determine the exact present distribution of the nice kids without exceeding 422 lbs per hub - prioritize price, then weight and assign to the nicest kids first
+
+## Santalytics Part 4
+
+Now that we've declared our model as the new Santalytics paradigm, we need to break it down for Santa! He's not a data guy, after all. Can you help make a visualization that will map out Santa's route for him? You must use Alteryx for at least some of your process.
+
+### Goal of Part 4:
+
+- Visualize Santa's trip around the globe
+
+
+
+
+
