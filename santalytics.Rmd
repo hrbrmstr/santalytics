@@ -6,7 +6,7 @@ editor_options:
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
 ```
 
 ## Santalytics Part 1
@@ -31,6 +31,7 @@ Some R packages we'll need:
 
 ```{r libs, cache = FALSE}
 library(fs)
+library(sf)
 library(here)
 library(readxl)
 library(Hmisc)
@@ -71,12 +72,14 @@ glimpse(ratings)
 ratings
 ```
 
-
 ```{r d1}
 if (!file.exists(here::here("data/actions.rds"))) {
+  
   list.files(here::here("data/santalytics/Data/"), pattern = "Action", full.names = TRUE) %>% 
     map_df(read_excel) -> actions
+  
   saveRDS(actions, here::here("data/actions.rds"))
+  
 }
 
 actions <- readRDS(here::here("data/actions.rds"))
@@ -86,11 +89,25 @@ glimpse(actions)
 actions
 ```
 
+```{r d5}
+recipients <- read_excel(here::here("data/santalytics/Data/Recipient Database.xlsx"))
+
+glimpse(recipients)
+
+recipients
+```
+
 ```{r d2}
 mutate(actions, Degree = ifelse(Alignment == "Naughty", -Degree, Degree)) %>% 
   count(ID, wt = Degree, name = "social_score") %>% 
   mutate(find_out = ifelse(social_score < 0, "naughty", "nice"))  -> surveillance_tally
 
+glimpse(surveillance_tally)
+
+surveillance_tally
+```
+
+```{r}
 ggplot(surveillance_tally, aes(social_score)) +
   geom_density(fill = alpha(ft_cols$blue, 3/4)) +
   labs(
@@ -98,16 +115,25 @@ ggplot(surveillance_tally, aes(social_score)) +
     title = "Surveillance Behaviour Score Distribution"
   ) +
   theme_ipsum_es(grid="XY")
+```
 
-arrange(surveillance_tally, social_score)
-
+```{r}
 filter(surveillance_tally, find_out == "naughty") %>% 
-  mutate(grp = cut2(social_score, g = 5) %>% as.integer()) %>% 
+  mutate(grp = cut2(social_score, g = 5) %>% fct_relevel(rev) %>% as.integer()) %>% 
   bind_rows(
     filter(surveillance_tally, find_out == "nice") %>% 
       mutate(grp = cut2(social_score, g = 20) %>% as.integer() %>% add(5)) 
-  ) -> surveillance_tally
+  ) %>% 
+  mutate(grp = factor(grp, levels = c(5:1, 6:25))) %>% 
+  arrange(social_score, grp) %>% 
+  left_join(recipients, "ID") -> surveillance_tally
 
+glimpse(surveillance_tally)
+
+surveillance_tally
+```
+
+```{r}
 count(surveillance_tally, grp, find_out) %>% 
   ggplot(aes(grp, n)) +
   geom_col(aes(fill = find_out)) +
@@ -115,48 +141,30 @@ count(surveillance_tally, grp, find_out) %>%
   theme_ipsum_es(grid="Y")
 ```
 
-
 ```{r d4}
 presents <- read_excel(here::here("data/santalytics/Data/Presents.xlsx"))
 
 glimpse(presents)
 
+presents
+
 presents %>% 
   mutate(
     Price = as.numeric(Price),
-    grp = cut2(Price, g = 20) %>% as.integer() %>% add(5)
+    grp = cut2(Price, m = nrow(presents)/20, g = 20) %>% as.integer() %>% add(5)
   ) -> presents
 
 count(presents, grp)
 ```
 
-
-```{r}
-addresses <- read_excel(here::here("data/santalytics/Data/Address Database.xlsx"))
-ggplot(addresses) + geom_point(aes(Longitude, Latitude))
-```
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 ## Santalytics Part 2
 
-With an impossible task looming, poor old Santa is clueless at best. There are 15,000 kids in this route (Recipient 
+- Alteryx Original Post: <https://community.alteryx.com/t5/SANTALYTICS-2016/SANTALYTICS-Part-2/m-p/39424#U39424>
+- Alteryx Original Solution: <https://community.alteryx.com/t5/Alter-Nation-Blog/SANTALYTICS-Part-2-Solution-and-Behind-the-Data/ba-p/40030>
 
 The Elf thanks you all for participating in Part 1. In fact we are so excited over the level of participation, that we are upping the ante. Stay tuned on that.  For now we are onto part 2 and it's going to get tricky. 
 
-With nice kids scattered across the globe, Santa can't be wasting any time this Holiday season! Use the Create Points Tool, of course, to identify where all our presents need to make it this year. We'll have to call on the elves to distribute them to each house, but let's see if we can't keep Santa from making any extra trips.
+With nice kids scattered across the globe, Santa can't be wasting any time this Holiday season! Identify where all our presents need to make it this year. We'll have to call on the elves to distribute them to each house, but let's see if we can't keep Santa from making any extra trips.
 
 Determine the least number of trade areas we can distribute bunches of presents to while making sure that no two points in a distribution hub are more than 500 miles apart - remember, we only need to worry about including the nice kids who will be getting presents delivered this year. Once your distribution hubs are assigned, what's the minimum weight that we can use for every one of the hubs while making sure each kid gets a present from the classification of present that they earned? Santa will worry about how many reindeer to hook to the sleigh, but we need to let him know the minimum towage to account for!
 
@@ -166,7 +174,133 @@ Determine the least number of trade areas we can distribute bunches of presents 
 - Identify the minimum weight that be used to deliver presents (with respect to each present class in that hub) to every hub, excluding presents of 0 or null weight
 
 
+```{r map}
+addresses <- read_excel(here::here("data/santalytics/Data/Address Database.xlsx"))
+
+glimpse(addresses)
+
+addresses
+
+filter(surveillance_tally, find_out == "nice") %>% 
+  left_join(addresses, c("ID" = "Recipient ID")) %>% 
+  st_as_sf(coords = c("Longitude", "Latitude")) %>% 
+  st_set_crs(4326) -> nice_addresses
+```
+
+```{r}
+ggplot() + 
+  geom_sf(data = nice_addresses, size = 0.125) +
+  coord_sf(crs = "+proj=eqearth +wktext", datum = NA) +
+  theme_ipsum_es(grid="")
+```
+
+```{r dist}
+nice_addresses <- st_transform(nice_addresses, crs = "+proj=eqearth +wktext")
+
+if (!all(file.exists(here::here("data", c("hub-members.rds", "hubs.rds"))))) {
+  
+  naddr <- nice_addresses[, "ID"] # make a copy
+  nbuf <- st_buffer(naddr, dist = 250*1609.34) # make circle polygons
+  
+  hubs <- NULL # will store the hub #'s
+  hub_members <- vector("list") # all the hub members
+  
+  repeat {
+    
+    message("Addresses left: ", sprintf("%5d", nrow(naddr)),
+            " • Hub count: ", sprintf("%3d", nrow(hubs) %||% 0))
+    
+    close <- st_intersects(naddr, nbuf) # find intersecting points in each circle
+    
+    opt <- close[[which.max(lengths(close))[[1]]]] # pick the biggest one
+    
+    st_union(naddr[opt,]) %>%
+      st_centroid() %>%
+      st_nearest_feature(naddr[opt,]) -> hub # get the point closest to the center of the circle
+    
+    hubs <- rbind(hubs, naddr[opt,][hub,]) # add to the hubs list
+    hub_members <- append(hub_members, list(naddr[opt,])) # add to members
+    
+    naddr  <- naddr[-(opt),] # reduce the population
+    
+    if (nrow(naddr) == 0) break # done if none left
+    
+    nbuf <- st_buffer(naddr, dist = 402336) # make new polygons
+    
+  }
+  
+  saveRDS(hubs, here::here("data/hubs.rds"))
+  saveRDS(hub_members, here::here("data/hub-members.rds"))
+  
+}
+
+# Let's take a look at the hubs!
+
+hubs <- readRDS(here::here("data/hubs.rds"))
+hub_members <- readRDS(here::here("data/hub-members.rds"))
+
+hulls <- map(hub_members, ~st_union(.x) %>% st_convex_hull())
+hulls <- do.call(c, hulls)
+
+# take another look
+
+ggplot() +
+  geom_sf(data = st_buffer(hubs, dist = 250*1609.34), fill = NA, size = 0.125, color = "#b2b2b2") +
+  geom_sf(data = hulls, fill = "black", size = 0.125) +
+  geom_sf(data = nice_addresses, size = 0.125, color = "#b2b2b2") +
+  geom_sf(data = hubs, color = "red", size = 0.25) +
+  coord_sf(datum = NA)
+
+# bring them back together
+# prbly cld have just used data frames (which wld take less time to knit back together)
+if (!file.exists(here::here("data/hub-groups.rds"))) {
+  
+  pb <- progress_estimated(length(hub_members))
+  
+  map(1:length(hub_members), ~{
+    pb$tick()$print()
+    mutate(hub_members[[.x]], delivery_group = .x)  
+  }) %>% 
+    do.call(rbind, .) -> hub_groups
+ 
+  saveRDS(hub_groups, here::here("data/hub-groups.rds")) 
+  
+}
+
+hub_groups <- readRDS(here::here("data/hub-groups.rds")) 
+
+# add the naughty/nice scores
+hub_groups %>% 
+  left_join(
+    as_tibble(nice_addresses) %>% 
+      select(ID, social_score, find_out, grp),
+    "ID"
+  ) -> hub_groups
+
+# find the max weight present per "nice" group
+# i might have misunderstood this section
+group_by(presents, grp) %>% 
+  top_n(1, wt=Weight) %>% 
+  select(grp, Weight) %>% 
+  ungroup() %>% 
+  mutate(
+    Weight = as.numeric(Weight),
+    grp = factor(grp, levels = 1:25, labels = c(5:1, 6:25))
+  ) -> max_wt
+
+hub_groups %>% 
+  left_join(max_wt, "grp") %>% 
+  count(delivery_group, wt = Weight, name = "min_weight") %>% 
+  as_tibble() %>% 
+  select(-geometry) -> min_weights
+
+min_weights
+```
+
 ## Santalytics Part 3
+
+- Alteryx Original Post: <https://community.alteryx.com/t5/SANTALYTICS-2016/SANTALYTICS-Part-3/m-p/40130#M44>
+- Alteryx Original Solution: <https://community.alteryx.com/t5/Alter-Nation-Blog/SANTALYTICS-Part-3-Solution-and-Behind-the-Data/ba-p/40941>
 
 In Part 2 we identified the hubs Santa will visit this season and the minimum weight that can deliver presents to every kid in those hubs with respect to their present score.
 
@@ -180,13 +314,12 @@ Determine the exact present distribution of the nice kids without exceeding 422 
 
 ## Santalytics Part 4
 
+- Alteryx Original Post: <https://community.alteryx.com/t5/SANTALYTICS-2016/SANTALYTICS-Part-4/m-p/40944#M53>
+- Alteryx Original Solution: <https://community.alteryx.com/t5/Alter-Nation-Blog/SANTALYTICS-Part-4-Solution-and-Series-Finale/ba-p/41631>
+
 Now that we've declared our model as the new Santalytics paradigm, we need to break it down for Santa! He's not a data guy, after all. Can you help make a visualization that will map out Santa's route for him? You must use Alteryx for at least some of your process.
 
 ### Goal of Part 4:
 
 - Visualize Santa's trip around the globe
-
-
-
-
 
