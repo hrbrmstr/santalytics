@@ -1,9 +1,10 @@
 ---
-title: "README"
+title: "Santalytics"
 author: "@hrbrmstr"
 date: December 22, 2019
 output: rmarkdown::github_document
 ---
 
-santalytics is ...
+#rstats version of the 2016 Alteryx Santalytics challenge
 
+https://community.alteryx.com/t5/SANTALYTICS-2016/SANTALYTICS-Part-1/m-p/38846/thread-id/2
